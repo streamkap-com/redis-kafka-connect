@@ -72,7 +72,7 @@ public class RedisSinkConfigDef extends RedisConfigDef {
     
     public static final String MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG = "streamkap.messageToCollection.mapping";
     
-    public static final MessageToCollectionEntryMap MESSAGE_TO_COLLECTION_ENTRY_MAP_DEFAULT = MessageToCollectionEntryMap.KEY;
+    public static final MessageToCollectionEntryMap MESSAGE_TO_COLLECTION_ENTRY_MAP_DEFAULT = MessageToCollectionEntryMap.VALUE;
 
     public RedisSinkConfigDef() {
         define();
