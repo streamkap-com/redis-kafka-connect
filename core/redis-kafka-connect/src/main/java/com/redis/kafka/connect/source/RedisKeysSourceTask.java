@@ -26,6 +26,8 @@ import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.errors.RetriableException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.batch.item.ItemStreamException;
 
@@ -39,6 +41,8 @@ import io.lettuce.core.AbstractRedisClient;
 import io.lettuce.core.codec.StringCodec;
 
 public class RedisKeysSourceTask extends SourceTask {
+
+    private static final Logger log = LoggerFactory.getLogger(RedisKeysSourceTask.class);
 
     public static final Schema KEY_SCHEMA = Schema.STRING_SCHEMA;
 
@@ -79,6 +83,7 @@ public class RedisKeysSourceTask extends SourceTask {
 
     @Override
     public void start(Map<String, String> props) {
+        log.info("Starting {}", props);
         RedisKeysSourceConfig config = new RedisKeysSourceConfig(props);
         this.topic = config.getTopicName();
         this.batchSize = Math.toIntExact(config.getBatchSize());
@@ -94,6 +99,7 @@ public class RedisKeysSourceTask extends SourceTask {
         }
         try {
             reader.open(new ExecutionContext());
+            log.info("Started RedisKeysSourceTask with config: {}", config);
         } catch (ItemStreamException e) {
             throw new RetriableException("Could not open reader", e);
         }
@@ -119,6 +125,7 @@ public class RedisKeysSourceTask extends SourceTask {
 
     @Override
     public void stop() {
+        log.info("Stopping");
         if (reader != null) {
             reader.close();
             reader = null;
@@ -131,6 +138,7 @@ public class RedisKeysSourceTask extends SourceTask {
     }
 
     private SourceRecord convert(KeyValue<String> input) {
+        log.info("Converting input {}", input);
         Map<String, ?> partition = new HashMap<>();
         Map<String, ?> offset = new HashMap<>();
         String key = input.getKey();
@@ -141,8 +149,11 @@ public class RedisKeysSourceTask extends SourceTask {
 
     @Override
     public List<SourceRecord> poll() {
+        log.info("Task Poll start");
         // TODO: return heartbeat if no records
-        return reader.read(batchSize).stream().map(this::convert).collect(Collectors.toList());
+        List<SourceRecord> sourceRecords = reader.read(batchSize).stream().map(this::convert).collect(Collectors.toList());
+        log.info("Task Poll end, nb records {}", sourceRecords.size());
+        return sourceRecords;
     }
 
 }
