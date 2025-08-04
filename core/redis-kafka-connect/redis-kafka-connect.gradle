@@ -100,4 +100,14 @@ tasks.register('createConfluentArchive', Zip) {
     destinationDirectory = layout.buildDirectory.dir('confluent')
 }
 
-build.finalizedBy createConfluentArchive
+tasks.register('copyRuntimeJars', Copy) {
+    description = "Copies all runtime dependencies as individual JARs"
+    group = "Packaging"
+    from(configurations.runtimeClasspath)
+    from(jar) {
+        into("")
+    }
+    into("$buildDir/dependency-jars")
+}
+
+build.finalizedBy copyRuntimeJars
