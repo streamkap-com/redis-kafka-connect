@@ -1,90 +1,131 @@
 package com.redis.kafka.connect;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-
-import com.redis.kafka.connect.sink.RedisSinkConfig.MessageToCollectionEntryMap;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.record.TimestampType;
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.SchemaAndValue;
-import org.apache.kafka.connect.data.SchemaBuilder;
-import org.apache.kafka.connect.errors.DataException;
-import org.apache.kafka.connect.sink.SinkRecord;
-import org.apache.kafka.connect.sink.SinkTaskContext;
+import org.apache.kafka.clients.producer.RecordMetadata;
+import org.apache.kafka.connect.data.Struct;
+import org.apache.kafka.connect.source.SourceRecord;
+import org.apache.kafka.connect.source.SourceTask;
+import org.apache.kafka.connect.source.SourceTaskContext;
+import org.apache.kafka.connect.storage.OffsetStorageReader;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.platform.commons.util.Preconditions;
+import org.junit.jupiter.api.TestInfo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.batch.core.JobExecutionException;
 import org.springframework.util.Assert;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableSet;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.redis.kafka.connect.sink.RedisSinkConfig.RedisCommand;
-import com.redis.kafka.connect.sink.RedisSinkConfigDef;
-import com.redis.kafka.connect.sink.RedisSinkTask;
-import com.redis.lettucemod.timeseries.Sample;
-import com.redis.lettucemod.timeseries.TimeRange;
+import com.redis.kafka.connect.common.RedisConfigDef;
+import com.redis.kafka.connect.source.RedisKeysSourceConfigDef;
+import com.redis.kafka.connect.source.RedisKeysSourceTask;
+import com.redis.kafka.connect.source.RedisStreamSourceConfig;
+import com.redis.kafka.connect.source.RedisStreamSourceConfigDef;
+import com.redis.kafka.connect.source.RedisStreamSourceTask;
+import com.redis.kafka.connect.source.ToStructFunction;
+import com.redis.lettucemod.api.sync.RedisModulesCommands;
 import com.redis.spring.batch.common.DataType;
+import com.redis.spring.batch.gen.GeneratorItemReader;
+import com.redis.spring.batch.reader.KeyValueItemReader;
 import com.redis.spring.batch.test.AbstractTestBase;
+import com.redis.spring.batch.writer.StructItemWriter;
 
-import io.lettuce.core.KeyValue;
-import io.lettuce.core.Range;
-import io.lettuce.core.ScoredValue;
-import io.lettuce.core.StreamMessage;
+import io.lettuce.core.codec.StringCodec;
+import io.lettuce.core.models.stream.PendingMessages;
 
-abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
+abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
 
-    public static final int PARTITION = 1;
+    private static final Logger log = LoggerFactory.getLogger(AbstractSourceIntegrationTests.class);
 
-    public static final long OFFSET = 91283741L;
+    private RedisStreamSourceTask streamSourceTask;
 
-    public static final long TIMESTAMP = 1530286549123L;
-
-    public static SinkRecord write(String topic, SchemaAndValue key, SchemaAndValue value) {
-        Preconditions.notNull(topic, "topic cannot be null");
-        Preconditions.notNull(key, "key cannot be null.");
-        Preconditions.notNull(key.value(), "key cannot be null.");
-        Preconditions.notNull(value, "value cannot be null.");
-        Preconditions.notNull(value.value(), "value cannot be null.");
-
-        return new SinkRecord(topic, PARTITION, key.schema(), key.value(), value.schema(), value.value(), OFFSET, TIMESTAMP,
-            TimestampType.CREATE_TIME);
-    }
-
-    public static SinkRecord delete(String topic, SchemaAndValue key) {
-        Preconditions.notNull(topic, "topic cannot be null");
-        if (null == key) {
-            throw new DataException("key cannot be null.");
-        }
-        if (null == key.value()) {
-            throw new DataException("key cannot be null.");
-        }
-
-        return new SinkRecord(topic, PARTITION, key.schema(), key.value(), null, null, OFFSET, TIMESTAMP,
-            TimestampType.CREATE_TIME);
-    }
+    private RedisKeysSourceTask keysSourceTask;
 
     @Override
     protected DataType[] generatorDataTypes() {
-        return AbstractTestBase.REDIS_MODULES_GENERATOR_TYPES;
+        return AbstractTestBase.REDIS_GENERATOR_TYPES;
+    }
+
+    @BeforeEach
+    public void setupTasks() {
+        streamSourceTask = new RedisStreamSourceTask();
+        keysSourceTask = new RedisKeysSourceTask();
+    }
+
+    @AfterEach
+    public void teardownTasks() {
+        keysSourceTask.stop();
+        streamSourceTask.stop();
+    }
+
+    // Used to initialize a task with a previous connect offset (as though records
+    // had been committed).
+    void initializeTask(String id) throws Exception {
+        streamSourceTask.initialize(new SourceTaskContext() {
+
+            @Override
+            public OffsetStorageReader offsetStorageReader() {
+                return new OffsetStorageReader() {
+
+                    @Override
+                    public <T> Map<Map<String, T>, Map<String, Object>> offsets(Collection<Map<String, T>> partitions) {
+                        throw new UnsupportedOperationException("OffsetStorageReader.offsets()");
+                    }
+
+                    @Override
+                    public <T> Map<String, Object> offset(Map<String, T> partition) {
+                        return Collections.singletonMap(RedisStreamSourceTask.OFFSET_FIELD, id);
+                    }
+
+                };
+            }
+
+            @Override
+            public Map<String, String> configs() {
+                throw new UnsupportedOperationException("SourceTaskContext.configs()");
+            }
+
+        });
+        keysSourceTask.initialize(new SourceTaskContext() {
+
+            @Override
+            public OffsetStorageReader offsetStorageReader() {
+                return null;
+            }
+
+            @Override
+            public Map<String, String> configs() {
+                throw new UnsupportedOperationException("SourceTaskContext.configs()");
+            }
+
+        });
+    }
+
+    private void startTask(SourceTask task, String... props) {
+        Map<String, String> config = map(props);
+        config.put(RedisConfigDef.URI_CONFIG, getRedisServer().getRedisURI());
+        task.start(config);
+
+    }
+
+    private void startStreamSourceTask(String... props) {
+        startTask(streamSourceTask, props);
+    }
+
+    private void startKeysSourceTask(String... props) {
+        startTask(keysSourceTask, props);
     }
 
     protected Map<String, String> map(String... args) {
@@ -97,433 +138,340 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         return body;
     }
 
-    private RedisSinkTask task;
-
-    @BeforeEach
-    public void createTask() {
-        task = new RedisSinkTask();
-    }
-
-    @AfterEach
-    public void stopTask() {
-        if (null != this.task) {
-            this.task.stop();
-        }
+    @Test
+    void pollStreamAtMostOnce() throws InterruptedException {
+        String stream = "stream1";
+        String topicPrefix = "testprefix-";
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+            RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
+        String field1 = "field1";
+        String value1 = "value1";
+        String field2 = "field2";
+        String value2 = "value2";
+        Map<String, String> body = map(field1, value1, field2, value2);
+        String id1 = connection.sync().xadd(stream, body);
+        String id2 = connection.sync().xadd(stream, body);
+        String id3 = connection.sync().xadd(stream, body);
+        List<SourceRecord> sourceRecords = new ArrayList<>();
+        Awaitility.await().until(() -> sourceRecords.addAll(streamSourceTask.poll()));
+        Assertions.assertEquals(3, sourceRecords.size());
+        assertEquals(id1, body, stream, topicPrefix + stream, sourceRecords.get(0));
+        assertEquals(id2, body, stream, topicPrefix + stream, sourceRecords.get(1));
+        assertEquals(id3, body, stream, topicPrefix + stream, sourceRecords.get(2));
+        PendingMessages pendingMsgs = connection.sync().xpending(stream,
+            RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
+        Assertions.assertEquals(0, pendingMsgs.getCount(), "pending messages");
     }
 
     @Test
-    void emptyAssignment() {
-        SinkTaskContext taskContext = mock(SinkTaskContext.class);
-        when(taskContext.assignment()).thenReturn(ImmutableSet.of());
-        this.task.initialize(taskContext);
-        this.task.start(ImmutableMap.of(RedisSinkConfigDef.URI_CONFIG, getRedisServer().getRedisURI()));
+    void pollStreamAtLeastOnce() throws InterruptedException {
+        String stream = "stream1";
+        String topicPrefix = "testprefix-";
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+        String field1 = "field1";
+        String value1 = "value1";
+        String field2 = "field2";
+        String value2 = "value2";
+        Map<String, String> body = map(field1, value1, field2, value2);
+        String id1 = connection.sync().xadd(stream, body);
+        String id2 = connection.sync().xadd(stream, body);
+        String id3 = connection.sync().xadd(stream, body);
+        List<SourceRecord> sourceRecords = new ArrayList<>();
+        Awaitility.await().until(() -> sourceRecords.addAll(streamSourceTask.poll()));
+        Assertions.assertEquals(3, sourceRecords.size());
+        assertEquals(id1, body, stream, topicPrefix + stream, sourceRecords.get(0));
+        assertEquals(id2, body, stream, topicPrefix + stream, sourceRecords.get(1));
+        assertEquals(id3, body, stream, topicPrefix + stream, sourceRecords.get(2));
+        PendingMessages pendingMsgsBeforeCommit = connection.sync().xpending(stream,
+            RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
+        Assertions.assertEquals(3, pendingMsgsBeforeCommit.getCount(), "pending messages before commit");
+        streamSourceTask.commitRecord(sourceRecords.get(0), new RecordMetadata(null, 0, 0, 0, 0, 0));
+        streamSourceTask.commitRecord(sourceRecords.get(1), new RecordMetadata(null, 0, 0, 0, 0, 0));
+        streamSourceTask.commit();
+        PendingMessages pendingMsgsAfterCommit = connection.sync().xpending(stream,
+            RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
+        Assertions.assertEquals(1, pendingMsgsAfterCommit.getCount(), "pending messages after commit");
     }
 
     @Test
-    void putEmpty() {
-        String topic = "putWrite";
-        SinkTaskContext context = mock(SinkTaskContext.class);
-        when(context.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, 1)));
-        this.task.initialize(context);
-        this.task.start(ImmutableMap.of(RedisSinkConfigDef.URI_CONFIG, getRedisServer().getRedisURI()));
-        this.task.put(ImmutableList.of());
+    void pollStreamAtLeastOnceRecover() throws InterruptedException {
+        String stream = "stream1";
+        String topicPrefix = "testprefix-";
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+        String field1 = "field1";
+        String value1 = "value1";
+        String field2 = "field2";
+        String value2 = "value2";
+        Map<String, String> body = map(field1, value1, field2, value2);
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+        List<SourceRecord> sourceRecords = new ArrayList<>();
+        Awaitility.await().until(() -> sourceRecords.addAll(streamSourceTask.poll()));
+        Assertions.assertEquals(3, sourceRecords.size());
+
+        List<SourceRecord> recoveredRecords = new ArrayList<>();
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+
+        // create a new task, same config
+        setupTasks();
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+
+        Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
+        Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
+
+        Assertions.assertEquals(6, recoveredRecords.size());
     }
 
     @Test
-    void putHash() {
-        String topic = "hash";
-        int count = 50;
-        Map<String, Map<String, String>> expected = new LinkedHashMap<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            Map<String, String> map = map("field1", "This is field1 value" + i, "field2", "This is field2 value " + i);
-            expected.put("hash:" + i, map);
-            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, i),
-                new SchemaAndValue(SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA), map)));
-        }
-        put(topic, RedisCommand.HSET, records);
-        for (String key : expected.keySet()) {
-            Map<String, String> hash = expected.get(key);
-            Map<String, String> actual = connection.sync().hgetall(key);
-            assertEquals(hash, actual, String.format("Hash for key '%s' does not match.", key));
-        }
-    }
+    void pollStreamAtLeastOnceRecoverUncommitted() throws InterruptedException {
+        String stream = "stream1";
+        String topicPrefix = "testprefix-";
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+        String field1 = "field1";
+        String value1 = "value1";
+        String field2 = "field2";
+        String value2 = "value2";
+        Map<String, String> body = map(field1, value1, field2, value2);
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+        String id3 = connection.sync().xadd(stream, body);
+        List<SourceRecord> sourceRecords = new ArrayList<>();
+        Awaitility.await().until(() -> sourceRecords.addAll(streamSourceTask.poll()));
+        Assertions.assertEquals(3, sourceRecords.size());
+        streamSourceTask.commitRecord(sourceRecords.get(0), new RecordMetadata(null, 0, 0, 0, 0, 0));
+        streamSourceTask.commitRecord(sourceRecords.get(1), new RecordMetadata(null, 0, 0, 0, 0, 0));
+        streamSourceTask.commit();
 
-    public static class Person {
+        List<SourceRecord> recoveredRecords = new ArrayList<>();
+        String id4 = connection.sync().xadd(stream, body);
+        String id5 = connection.sync().xadd(stream, body);
+        String id6 = connection.sync().xadd(stream, body);
 
-        private long id;
+        // create a new task, same config
+        setupTasks();
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
 
-        private String name;
-
-        private Set<String> hobbies = new HashSet<>();
-
-        private Address address;
-
-        public long getId() {
-            return id;
-        }
-
-        public void setId(long id) {
-            this.id = id;
-        }
-
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public Set<String> getHobbies() {
-            return hobbies;
-        }
-
-        public void setHobbies(Set<String> hobbies) {
-            this.hobbies = hobbies;
-        }
-
-        public Address getAddress() {
-            return address;
-        }
-
-        public void setAddress(Address address) {
-            this.address = address;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(address, hobbies, id, name);
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj)
-                return true;
-            if (obj == null)
-                return false;
-            if (getClass() != obj.getClass())
-                return false;
-            Person other = (Person) obj;
-            return Objects.equals(address, other.address) && Objects.equals(hobbies, other.hobbies) && id == other.id
-                && Objects.equals(name, other.name);
-        }
-
-    }
-
-    public static class Address {
-
-        private String street;
-
-        private String city;
-
-        private String state;
-
-        private String zip;
-
-        public String getStreet() {
-            return street;
-        }
-
-        public void setStreet(String street) {
-            this.street = street;
-        }
-
-        public String getCity() {
-            return city;
-        }
-
-        public void setCity(String city) {
-            this.city = city;
-        }
-
-        public String getState() {
-            return state;
-        }
-
-        public void setState(String state) {
-            this.state = state;
-        }
-
-        public String getZip() {
-            return zip;
-        }
-
-        public void setZip(String zip) {
-            this.zip = zip;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(city, state, street, zip);
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj)
-                return true;
-            if (obj == null)
-                return false;
-            if (getClass() != obj.getClass())
-                return false;
-            Address other = (Address) obj;
-            return Objects.equals(city, other.city) && Objects.equals(state, other.state)
-                && Objects.equals(street, other.street) && Objects.equals(zip, other.zip);
-        }
-
+        // Wait until task.poll() doesn't return any more records
+        Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
+        Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
+        List<String> recoveredIds = recoveredRecords.stream().map(SourceRecord::key).map(String::valueOf)
+            .collect(Collectors.toList());
+        Assertions.assertEquals(Arrays.<String> asList(id3, id4, id5, id6), recoveredIds, "recoveredIds");
     }
 
     @Test
-    void putJSON() throws JsonProcessingException {
-        String topic = "putJSON";
-        List<Person> persons = new ArrayList<>();
-        Person person1 = new Person();
-        person1.setId(1);
-        person1.setName("Bodysnitch Canderbunt");
-        person1.setHobbies(new HashSet<>(Arrays.asList("Fishing", "Singing")));
-        Address address1 = new Address();
-        address1.setCity("New York");
-        address1.setZip("10013");
-        address1.setState("NY");
-        address1.setStreet("150 Mott St");
-        person1.setAddress(address1);
-        persons.add(person1);
-        Person person2 = new Person();
-        person2.setId(2);
-        person2.setName("Buffalo Custardbath");
-        person2.setHobbies(new HashSet<>(Arrays.asList("Surfing", "Piano")));
-        Address address2 = new Address();
-        address2.setCity("Los Angeles");
-        address2.setZip("90001");
-        address2.setState("CA");
-        address2.setStreet("123 Sunset Blvd");
-        person2.setAddress(address2);
-        persons.add(person2);
-        Person person3 = new Person();
-        person3.setId(3);
-        person3.setName("Bumblesnuff Crimpysnitch");
-        person3.setHobbies(new HashSet<>(Arrays.asList("Skiing", "Drums")));
-        Address address3 = new Address();
-        address3.setCity("Chicago");
-        address3.setZip("60603");
-        address3.setState("IL");
-        address3.setStreet("100 S State St");
-        person3.setAddress(address3);
-        persons.add(person3);
-        List<SinkRecord> records = new ArrayList<>();
-        ObjectMapper mapper = new ObjectMapper();
-        for (Person person : persons) {
-            String json = mapper.writeValueAsString(person);
-            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, person.getId()),
-                new SchemaAndValue(Schema.STRING_SCHEMA, json)));
-        }
-        put(topic, RedisCommand.JSONSET, records);
-        for (Person person : persons) {
-            String json = connection.sync().jsonGet(topic + ":" + person.getId());
-            assertEquals(person, mapper.readValue(json, Person.class));
-        }
+    void pollStreamAtLeastOnceRecoverFromOffset() throws Exception {
+        String stream = "stream1";
+        String topicPrefix = "testprefix-";
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+        String field1 = "field1";
+        String value1 = "value1";
+        String field2 = "field2";
+        String value2 = "value2";
+        Map<String, String> body = map(field1, value1, field2, value2);
+        String id1 = connection.sync().xadd(stream, body);
+        log.info("ID1: " + id1);
+        String id2 = connection.sync().xadd(stream, body);
+        log.info("ID2: " + id2);
+        String id3 = connection.sync().xadd(stream, body);
+        log.info("ID3: " + id3);
+        List<SourceRecord> records = new ArrayList<>();
+        Awaitility.await().until(() -> records.addAll(streamSourceTask.poll()));
+        Assertions.assertEquals(3, records.size());
+
+        List<SourceRecord> recoveredRecords = new ArrayList<>();
+        String id4 = connection.sync().xadd(stream, body);
+        log.info("ID4: " + id4);
+        String id5 = connection.sync().xadd(stream, body);
+        log.info("ID5: " + id5);
+        String id6 = connection.sync().xadd(stream, body);
+        log.info("ID6: " + id6);
+
+        // create a new task, same config
+        setupTasks();
+        // this means connect committed records, but StreamSourceTask didn't get a
+        // chance to ack first
+        initializeTask(id3);
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+
+        // Wait until task.poll() doesn't return any more records
+        Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
+        Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
+
+        List<String> recoveredIds = recoveredRecords.stream().map(SourceRecord::key).map(String::valueOf)
+            .collect(Collectors.toList());
+        Assertions.assertEquals(Arrays.<String> asList(id4, id5, id6), recoveredIds, "recoveredIds");
     }
 
     @Test
-    void putTimeSeries() {
-        String topic = "putTimeSeries";
-        int count = 50;
-        long startTime = System.currentTimeMillis() - count;
-        List<Sample> expectedSamples = new ArrayList<>();
-        List<SinkRecord> records = new ArrayList<>();
-        for (int index = 1; index <= count; index++) {
-            long timestamp = startTime + index;
-            double value = index;
-            expectedSamples.add(Sample.of(timestamp, value));
-            records.add(write(topic, new SchemaAndValue(Schema.INT64_SCHEMA, timestamp),
-                new SchemaAndValue(Schema.FLOAT64_SCHEMA, value)));
-        }
-        put(topic, RedisCommand.TSADD, records);
-        List<Sample> actualSamples = connection.sync().tsRange(topic, TimeRange.unbounded());
-        assertEquals(expectedSamples.size(), actualSamples.size());
-        for (int index = 0; index < expectedSamples.size(); index++) {
-            Sample expectedSample = expectedSamples.get(index);
-            Sample actualSample = actualSamples.get(index);
-            assertEquals(expectedSample.getTimestamp(), actualSample.getTimestamp());
-            assertEquals(expectedSample.getValue(), actualSample.getValue());
-        }
+    void pollStreamAtMostOnceRecover() throws InterruptedException {
+        String stream = "stream1";
+        String topicPrefix = "testprefix-";
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+            RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
+        String field1 = "field1";
+        String value1 = "value1";
+        String field2 = "field2";
+        String value2 = "value2";
+        Map<String, String> body = map(field1, value1, field2, value2);
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+        List<SourceRecord> sourceRecords = new ArrayList<>();
+        Awaitility.await().until(() -> sourceRecords.addAll(streamSourceTask.poll()));
+        Assertions.assertEquals(3, sourceRecords.size());
+
+        List<SourceRecord> recoveredRecords = new ArrayList<>();
+        String id4 = connection.sync().xadd(stream, body);
+        String id5 = connection.sync().xadd(stream, body);
+        String id6 = connection.sync().xadd(stream, body);
+
+        // create a new task, same config
+        setupTasks();
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+            RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
+
+        // Wait until task.poll() doesn't return any more records
+        Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
+        Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
+        List<String> recoveredIds = recoveredRecords.stream().map(SourceRecord::key).map(String::valueOf)
+            .collect(Collectors.toList());
+        Assertions.assertEquals(Arrays.asList(id4, id5, id6), recoveredIds, "recoveredIds");
     }
 
     @Test
-    void putLpush() {
-        String topic = "putLpush";
-        int count = 50;
-        List<String> expected = new ArrayList<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            String member = "listmember:" + i;
-            expected.add(member);
-            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
-                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
-        }
-        put(topic, RedisCommand.LPUSH, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
-        List<String> actual = connection.sync().lrange(topic, 0, -1);
-        Collections.reverse(actual);
-        assertEquals(expected, actual);
+    void pollStreamRecoverAtLeastOnceToAtMostOnce() throws InterruptedException {
+        String stream = "stream1";
+        String topicPrefix = "testprefix-";
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+            RedisStreamSourceConfig.STREAM_DELIVERY_AT_LEAST_ONCE);
+        String field1 = "field1";
+        String value1 = "value1";
+        String field2 = "field2";
+        String value2 = "value2";
+        Map<String, String> body = map(field1, value1, field2, value2);
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+        connection.sync().xadd(stream, body);
+        List<SourceRecord> sourceRecords = new ArrayList<>();
+        Awaitility.await().until(() -> sourceRecords.addAll(streamSourceTask.poll()));
+        Assertions.assertEquals(3, sourceRecords.size());
+
+        List<SourceRecord> recoveredRecords = new ArrayList<>();
+        String id4 = connection.sync().xadd(stream, body);
+        String id5 = connection.sync().xadd(stream, body);
+        String id6 = connection.sync().xadd(stream, body);
+
+        // create a new task, same config except AT_MOST_ONCE
+        setupTasks();
+        startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
+            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+            RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
+
+        // Wait until task.poll() doesn't return any more records
+        Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
+        Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
+        List<String> recoveredIds = recoveredRecords.stream().map(SourceRecord::key).map(String::valueOf)
+            .collect(Collectors.toList());
+        Assertions.assertEquals(Arrays.asList(id4, id5, id6), recoveredIds, "recoveredIds");
+
+        PendingMessages pending = connection.sync().xpending(stream, RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
+        Assertions.assertEquals(0, pending.getCount(), "pending message count");
+    }
+
+    private void assertEquals(String expectedId, Map<String, String> expectedBody, String expectedStream, String expectedTopic,
+        SourceRecord record) {
+        Struct struct = (Struct) record.value();
+        Assertions.assertEquals(expectedId, struct.get("id"));
+        Assertions.assertEquals(expectedBody, struct.get("body"));
+        Assertions.assertEquals(expectedStream, struct.get("stream"));
+        Assertions.assertEquals(expectedTopic, record.topic());
     }
 
     @Test
-    void putRpush() {
-        String topic = "putRpush";
-        int count = 50;
-        List<String> expected = new ArrayList<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            String member = "listmember:" + i;
-            expected.add(member);
-            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
-                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
-        }
-        put(topic, RedisCommand.RPUSH, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
-        List<String> actual = connection.sync().lrange(topic, 0, -1);
-        assertEquals(expected, actual);
-    }
-
-    @Test
-    void putSet() {
-        String topic = "putSet";
-        int count = 50;
-        Set<String> expected = new HashSet<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            String member = "setmember:" + i;
-            expected.add(member);
-            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
-                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
-        }
-        put(topic, RedisCommand.SADD, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
-        Set<String> members = connection.sync().smembers(topic);
-        assertEquals(expected, members);
-    }
-
-    @Test
-    void putStream() {
-        String topic = "putStream";
-        int count = 50;
-        List<Map<String, String>> expected = new ArrayList<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            Map<String, String> body = map("field1", "This is field1 value" + i, "field2", "This is field2 value " + i);
-            expected.add(body);
-            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, "key" + i),
-                new SchemaAndValue(SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA), body)));
-        }
-        put(topic, RedisCommand.XADD, records);
-        List<StreamMessage<String, String>> messages = connection.sync().xrange(topic, Range.unbounded());
-        assertEquals(records.size(), messages.size());
-        for (int index = 0; index < messages.size(); index++) {
-            Map<String, String> body = expected.get(index);
-            StreamMessage<String, String> message = messages.get(index);
-            assertEquals(body, message.getBody(), String.format("Body for message #%s does not match.", index));
+    void pollKeys(TestInfo info) throws Exception {
+        enableKeyspaceNotifications(client);
+        String topic = "mytopic";
+        startKeysSourceTask(RedisKeysSourceConfigDef.TOPIC_CONFIG, topic, RedisKeysSourceConfigDef.IDLE_TIMEOUT_CONFIG, "3000");
+        KeyValueItemReader<String, String> reader = keysSourceTask.getReader();
+        Awaitility.await().until(reader::isOpen);
+        int count = 100;
+        final List<SourceRecord> sourceRecords = new ArrayList<>();
+        Executors.newSingleThreadScheduledExecutor().execute(() -> {
+            GeneratorItemReader generator = generator(count);
+            StructItemWriter<String, String> writer = new StructItemWriter<>(client, StringCodec.UTF8);
+            try {
+                run(info, step(info, 1, generator, null, writer));
+            } catch (JobExecutionException e) {
+                throw new RuntimeException("Could not execute data gen");
+            }
+        });
+        awaitUntil(() -> {
+            sourceRecords.addAll(keysSourceTask.poll());
+            return sourceRecords.size() >= count;
+        });
+        for (SourceRecord record : sourceRecords) {
+            Assertions.assertEquals(topic, record.topic());
+            Compare compare = values((Struct) record.value());
+            if (compare != null) {
+                Assertions.assertEquals(compare.expected, compare.actual);
+            }
         }
     }
 
-    @Test
-    void putString() {
-        String topic = "string";
-        int count = 50;
-        Map<String, String> expected = new LinkedHashMap<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            String key = String.valueOf(i);
-            String value = "This is value " + i;
-            expected.put(topic + ":" + key, value);
-            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, key),
-                new SchemaAndValue(Schema.STRING_SCHEMA, value)));
+    private static class Compare {
+
+        private final Object expected;
+
+        private final Object actual;
+
+        public Compare(Object expected, Object actual) {
+            this.expected = expected;
+            this.actual = actual;
         }
-        put(topic, RedisCommand.SET, records);
-        String[] keys = expected.keySet().toArray(new String[0]);
-        List<KeyValue<String, String>> actual = connection.sync().mget(keys);
-        assertEquals(records.size(), actual.size());
-        for (KeyValue<String, String> keyValue : actual) {
-            assertEquals(expected.get(keyValue.getKey()), keyValue.getValue(),
-                String.format("Value for key '%s' does not match.", keyValue.getKey()));
+
+    }
+
+    private Compare values(Struct struct) {
+        String key = struct.getString(ToStructFunction.FIELD_KEY);
+        DataType type = DataType.of(struct.getString(ToStructFunction.FIELD_TYPE));
+        Assertions.assertEquals(connection.sync().type(key), type.getString());
+        RedisModulesCommands<String, String> commands = connection.sync();
+        switch (type) {
+            case HASH:
+                return compare(commands.hgetall(key), struct.getMap(ToStructFunction.FIELD_HASH));
+            case JSON:
+                return compare(commands.jsonGet(key, "."), struct.getString(ToStructFunction.FIELD_JSON));
+            case LIST:
+                return compare(commands.lrange(key, 0, -1), struct.getArray(ToStructFunction.FIELD_LIST));
+            case SET:
+                return compare(commands.smembers(key), new HashSet<>(struct.getArray(ToStructFunction.FIELD_SET)));
+            case STRING:
+                return compare(commands.get(key), struct.getString(ToStructFunction.FIELD_STRING));
+            case ZSET:
+                return compare(ToStructFunction.zsetMap(commands.zrangeWithScores(key, 0, -1)),
+                    struct.getMap(ToStructFunction.FIELD_ZSET));
+            default:
+                return null;
         }
     }
 
-    @Test
-    void setBytes() {
-        String topic = "setBytes";
-        int count = 50;
-        Map<String, String> expected = new LinkedHashMap<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            String key = topic + i;
-            String value = "This is value " + i;
-            expected.put(key, value);
-            records.add(write(topic, new SchemaAndValue(Schema.BYTES_SCHEMA, key.getBytes(StandardCharsets.UTF_8)),
-                new SchemaAndValue(Schema.BYTES_SCHEMA, value.getBytes(StandardCharsets.UTF_8))));
-        }
-        put(topic, RedisCommand.SET, records, RedisSinkConfigDef.KEY_CONFIG, "");
-        String[] keys = expected.keySet().toArray(new String[0]);
-        List<KeyValue<String, String>> actual = connection.sync().mget(keys);
-        assertEquals(records.size(), actual.size());
-        for (KeyValue<String, String> keyValue : actual) {
-            assertEquals(expected.get(keyValue.getKey()), keyValue.getValue(),
-                String.format("Value for key '%s' does not match.", keyValue.getKey()));
-        }
-    }
-
-    @Test
-    void putZset() {
-        String topic = "putZset";
-        int count = 50;
-        List<ScoredValue<String>> expected = new ArrayList<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            String value = "zsetmember:" + i;
-            expected.add(ScoredValue.just(i, value));
-            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, value),
-                new SchemaAndValue(Schema.FLOAT64_SCHEMA, i)));
-        }
-        put(topic, RedisCommand.ZADD, records);
-        List<ScoredValue<String>> actual = connection.sync().zrangeWithScores(topic, 0, -1);
-        expected.sort(Comparator.comparing(ScoredValue::getScore));
-        assertEquals(expected, actual);
-    }
-
-    public void put(String topic, RedisCommand command, List<SinkRecord> records, String... props) {
-        SinkTaskContext taskContext = mock(SinkTaskContext.class);
-        when(taskContext.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, 1)));
-        task.initialize(taskContext);
-        Map<String, String> propsMap = map(RedisSinkConfigDef.URI_CONFIG, getRedisServer().getRedisURI(),
-            RedisSinkConfigDef.COMMAND_CONFIG, command.name());
-        propsMap.putAll(map(props));
-        task.start(propsMap);
-        task.put(records);
-    }
-
-    @Test
-    void putDelete() {
-        String topic = "putDelete";
-        SinkTaskContext taskContext = mock(SinkTaskContext.class);
-        when(taskContext.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, 1)));
-        this.task.initialize(taskContext);
-        this.task.start(ImmutableMap.of(RedisSinkConfigDef.URI_CONFIG, getRedisServer().getRedisURI(),
-            RedisSinkConfigDef.COMMAND_CONFIG, RedisCommand.DEL.name()));
-
-        int count = 50;
-        Map<String, String> expected = new LinkedHashMap<>(count);
-        List<SinkRecord> records = new ArrayList<>(count);
-
-        for (int i = 0; i < count; i++) {
-            final String value = "This is value " + i;
-            records.add(delete(topic, new SchemaAndValue(Schema.STRING_SCHEMA, i)));
-            expected.put(topic + ":" + i, value);
-        }
-        Map<String, String> values = expected.entrySet().stream()
-            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-
-        connection.sync().mset(values);
-        task.put(records);
-        String[] keys = expected.keySet().toArray(new String[0]);
-        long actual = connection.sync().exists(keys);
-        assertEquals(0L, actual, "All of the keys should be removed from Redis.");
+    private static Compare compare(Object expected, Object actual) {
+        return new Compare(expected, actual);
     }
 
 }
