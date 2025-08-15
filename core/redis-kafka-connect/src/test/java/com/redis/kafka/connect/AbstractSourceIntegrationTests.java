@@ -394,7 +394,7 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
     }
 
     private void assertEquals(String expectedId, Map<String, String> expectedBody, String expectedStream, String expectedTopic,
-        SourceRecord record) {
+            SourceRecord record) {
         Struct struct = (Struct) record.value();
         Assertions.assertEquals(expectedId, struct.get("id"));
         Assertions.assertEquals(expectedBody, struct.get("body"));
@@ -464,7 +464,7 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
                 return compare(commands.get(key), struct.getString(ToStructFunction.FIELD_STRING));
             case ZSET:
                 return compare(ToStructFunction.zsetMap(commands.zrangeWithScores(key, 0, -1)),
-                    struct.getMap(ToStructFunction.FIELD_ZSET));
+                        struct.getMap(ToStructFunction.FIELD_ZSET));
             default:
                 return null;
         }

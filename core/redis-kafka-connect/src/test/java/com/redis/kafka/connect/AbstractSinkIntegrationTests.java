@@ -443,7 +443,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         assertEquals(records.size(), actual.size());
         for (KeyValue<String, String> keyValue : actual) {
             assertEquals(expected.get(keyValue.getKey()), keyValue.getValue(),
-                String.format("Value for key '%s' does not match.", keyValue.getKey()));
+                    String.format("Value for key '%s' does not match.", keyValue.getKey()));
         }
     }
 
@@ -466,7 +466,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         assertEquals(records.size(), actual.size());
         for (KeyValue<String, String> keyValue : actual) {
             assertEquals(expected.get(keyValue.getKey()), keyValue.getValue(),
-                String.format("Value for key '%s' does not match.", keyValue.getKey()));
+                    String.format("Value for key '%s' does not match.", keyValue.getKey()));
         }
     }
 
@@ -493,7 +493,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         when(taskContext.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, PARTITION)));
         task.initialize(taskContext);
         Map<String, String> propsMap = map(RedisSinkConfigDef.URI_CONFIG, getRedisServer().getRedisURI(),
-            RedisSinkConfigDef.COMMAND_CONFIG, command.name());
+                RedisSinkConfigDef.COMMAND_CONFIG, command.name());
         propsMap.putAll(map(props));
         task.start(propsMap);
         task.put(records);
@@ -506,7 +506,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         when(taskContext.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, PARTITION)));
         this.task.initialize(taskContext);
         this.task.start(ImmutableMap.of(RedisSinkConfigDef.URI_CONFIG, getRedisServer().getRedisURI(),
-            RedisSinkConfigDef.COMMAND_CONFIG, RedisCommand.DEL.name()));
+                RedisSinkConfigDef.COMMAND_CONFIG, RedisCommand.DEL.name()));
 
         int count = 50;
         Map<String, String> expected = new LinkedHashMap<>(count);
@@ -518,7 +518,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             expected.put(topic + ":" + i, value);
         }
         Map<String, String> values = expected.entrySet().stream()
-            .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
 
         connection.sync().mset(values);
         task.put(records);
