@@ -66,7 +66,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         Preconditions.notNull(value.value(), "value cannot be null.");
 
         return new SinkRecord(topic, PARTITION, key.schema(), key.value(), value.schema(), value.value(), OFFSET, TIMESTAMP,
-            TimestampType.CREATE_TIME);
+                TimestampType.CREATE_TIME);
     }
 
     public static SinkRecord delete(String topic, SchemaAndValue key) {
@@ -79,7 +79,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         }
 
         return new SinkRecord(topic, PARTITION, key.schema(), key.value(), null, null, OFFSET, TIMESTAMP,
-            TimestampType.CREATE_TIME);
+                TimestampType.CREATE_TIME);
     }
 
     @Override
@@ -139,7 +139,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             Map<String, String> map = map("field1", "This is field1 value" + i, "field2", "This is field2 value " + i);
             expected.put("hash:" + i, map);
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, i),
-                new SchemaAndValue(SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA), map)));
+                    new SchemaAndValue(SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA), map)));
         }
         put(topic, RedisCommand.HSET, records);
         for (String key : expected.keySet()) {
@@ -206,7 +206,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
                 return false;
             Person other = (Person) obj;
             return Objects.equals(address, other.address) && Objects.equals(hobbies, other.hobbies) && id == other.id
-                && Objects.equals(name, other.name);
+                    && Objects.equals(name, other.name);
         }
 
     }
@@ -268,7 +268,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
                 return false;
             Address other = (Address) obj;
             return Objects.equals(city, other.city) && Objects.equals(state, other.state)
-                && Objects.equals(street, other.street) && Objects.equals(zip, other.zip);
+                    && Objects.equals(street, other.street) && Objects.equals(zip, other.zip);
         }
 
     }
@@ -315,7 +315,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         for (Person person : persons) {
             String json = mapper.writeValueAsString(person);
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, person.getId()),
-                new SchemaAndValue(Schema.STRING_SCHEMA, json)));
+                    new SchemaAndValue(Schema.STRING_SCHEMA, json)));
         }
         put(topic, RedisCommand.JSONSET, records);
         for (Person person : persons) {
@@ -336,7 +336,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             double value = index;
             expectedSamples.add(Sample.of(timestamp, value));
             records.add(write(topic, new SchemaAndValue(Schema.INT64_SCHEMA, timestamp),
-                new SchemaAndValue(Schema.FLOAT64_SCHEMA, value)));
+                    new SchemaAndValue(Schema.FLOAT64_SCHEMA, value)));
         }
         put(topic, RedisCommand.TSADD, records);
         List<Sample> actualSamples = connection.sync().tsRange(topic, TimeRange.unbounded());
@@ -359,7 +359,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             String member = "listmember:" + i;
             expected.add(member);
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
-                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+                    new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
 
         put(topic, RedisCommand.LPUSH, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
@@ -378,7 +378,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             String member = "listmember:" + i;
             expected.add(member);
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
-                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+                    new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
         put(topic, RedisCommand.RPUSH, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
         List<String> actual = connection.sync().lrange(topic, 0, -1);
@@ -395,7 +395,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             String member = "setmember:" + i;
             expected.add(member);
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
-                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+                    new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
         put(topic, RedisCommand.SADD, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
         Set<String> members = connection.sync().smembers(topic);
@@ -412,7 +412,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             Map<String, String> body = map("field1", "This is field1 value" + i, "field2", "This is field2 value " + i);
             expected.add(body);
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, "key" + i),
-                new SchemaAndValue(SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA), body)));
+                    new SchemaAndValue(SchemaBuilder.map(Schema.STRING_SCHEMA, Schema.STRING_SCHEMA), body)));
         }
         put(topic, RedisCommand.XADD, records);
         List<StreamMessage<String, String>> messages = connection.sync().xrange(topic, Range.unbounded());
@@ -458,7 +458,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             String value = "This is value " + i;
             expected.put(key, value);
             records.add(write(topic, new SchemaAndValue(Schema.BYTES_SCHEMA, key.getBytes(StandardCharsets.UTF_8)),
-                new SchemaAndValue(Schema.BYTES_SCHEMA, value.getBytes(StandardCharsets.UTF_8))));
+                    new SchemaAndValue(Schema.BYTES_SCHEMA, value.getBytes(StandardCharsets.UTF_8))));
         }
         put(topic, RedisCommand.SET, records, RedisSinkConfigDef.KEY_CONFIG, "");
         String[] keys = expected.keySet().toArray(new String[0]);
@@ -480,7 +480,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             String value = "zsetmember:" + i;
             expected.add(ScoredValue.just(i, value));
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, value),
-                new SchemaAndValue(Schema.FLOAT64_SCHEMA, i)));
+                    new SchemaAndValue(Schema.FLOAT64_SCHEMA, i)));
         }
         put(topic, RedisCommand.ZADD, records);
         List<ScoredValue<String>> actual = connection.sync().zrangeWithScores(topic, 0, -1);

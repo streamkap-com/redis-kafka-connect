@@ -143,8 +143,8 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         String stream = "stream1";
         String topicPrefix = "testprefix-";
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
-            RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+                RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
         String field1 = "field1";
         String value1 = "value1";
         String field2 = "field2";
@@ -160,7 +160,7 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         assertEquals(id2, body, stream, topicPrefix + stream, sourceRecords.get(1));
         assertEquals(id3, body, stream, topicPrefix + stream, sourceRecords.get(2));
         PendingMessages pendingMsgs = connection.sync().xpending(stream,
-            RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
+                RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
         Assertions.assertEquals(0, pendingMsgs.getCount(), "pending messages");
     }
 
@@ -169,7 +169,7 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         String stream = "stream1";
         String topicPrefix = "testprefix-";
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
         String field1 = "field1";
         String value1 = "value1";
         String field2 = "field2";
@@ -185,13 +185,13 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         assertEquals(id2, body, stream, topicPrefix + stream, sourceRecords.get(1));
         assertEquals(id3, body, stream, topicPrefix + stream, sourceRecords.get(2));
         PendingMessages pendingMsgsBeforeCommit = connection.sync().xpending(stream,
-            RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
+                RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
         Assertions.assertEquals(3, pendingMsgsBeforeCommit.getCount(), "pending messages before commit");
         streamSourceTask.commitRecord(sourceRecords.get(0), new RecordMetadata(null, 0, 0, 0, 0, 0));
         streamSourceTask.commitRecord(sourceRecords.get(1), new RecordMetadata(null, 0, 0, 0, 0, 0));
         streamSourceTask.commit();
         PendingMessages pendingMsgsAfterCommit = connection.sync().xpending(stream,
-            RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
+                RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
         Assertions.assertEquals(1, pendingMsgsAfterCommit.getCount(), "pending messages after commit");
     }
 
@@ -200,7 +200,7 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         String stream = "stream1";
         String topicPrefix = "testprefix-";
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
         String field1 = "field1";
         String value1 = "value1";
         String field2 = "field2";
@@ -221,7 +221,7 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         // create a new task, same config
         setupTasks();
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
 
         Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
         Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
@@ -234,7 +234,7 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         String stream = "stream1";
         String topicPrefix = "testprefix-";
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
         String field1 = "field1";
         String value1 = "value1";
         String field2 = "field2";
@@ -258,13 +258,13 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         // create a new task, same config
         setupTasks();
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
 
         // Wait until task.poll() doesn't return any more records
         Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
         Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
         List<String> recoveredIds = recoveredRecords.stream().map(SourceRecord::key).map(String::valueOf)
-            .collect(Collectors.toList());
+                .collect(Collectors.toList());
         Assertions.assertEquals(Arrays.<String> asList(id3, id4, id5, id6), recoveredIds, "recoveredIds");
     }
 
@@ -273,7 +273,7 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         String stream = "stream1";
         String topicPrefix = "testprefix-";
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
         String field1 = "field1";
         String value1 = "value1";
         String field2 = "field2";
@@ -303,14 +303,14 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         // chance to ack first
         initializeTask(id3);
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream);
 
         // Wait until task.poll() doesn't return any more records
         Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
         Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
 
         List<String> recoveredIds = recoveredRecords.stream().map(SourceRecord::key).map(String::valueOf)
-            .collect(Collectors.toList());
+                .collect(Collectors.toList());
         Assertions.assertEquals(Arrays.<String> asList(id4, id5, id6), recoveredIds, "recoveredIds");
     }
 
@@ -319,8 +319,8 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         String stream = "stream1";
         String topicPrefix = "testprefix-";
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
-            RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+                RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
         String field1 = "field1";
         String value1 = "value1";
         String field2 = "field2";
@@ -341,14 +341,14 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         // create a new task, same config
         setupTasks();
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
-            RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+                RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
 
         // Wait until task.poll() doesn't return any more records
         Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
         Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
         List<String> recoveredIds = recoveredRecords.stream().map(SourceRecord::key).map(String::valueOf)
-            .collect(Collectors.toList());
+                .collect(Collectors.toList());
         Assertions.assertEquals(Arrays.asList(id4, id5, id6), recoveredIds, "recoveredIds");
     }
 
@@ -357,8 +357,8 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         String stream = "stream1";
         String topicPrefix = "testprefix-";
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
-            RedisStreamSourceConfig.STREAM_DELIVERY_AT_LEAST_ONCE);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+                RedisStreamSourceConfig.STREAM_DELIVERY_AT_LEAST_ONCE);
         String field1 = "field1";
         String value1 = "value1";
         String field2 = "field2";
@@ -379,14 +379,14 @@ abstract class AbstractSourceIntegrationTests extends AbstractTestBase {
         // create a new task, same config except AT_MOST_ONCE
         setupTasks();
         startStreamSourceTask(RedisStreamSourceConfigDef.TOPIC_CONFIG, topicPrefix + RedisStreamSourceConfigDef.TOKEN_STREAM,
-            RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
-            RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
+                RedisStreamSourceConfigDef.STREAM_NAME_CONFIG, stream, RedisStreamSourceConfigDef.STREAM_DELIVERY_CONFIG,
+                RedisStreamSourceConfig.STREAM_DELIVERY_AT_MOST_ONCE);
 
         // Wait until task.poll() doesn't return any more records
         Awaitility.await().until(() -> recoveredRecords.addAll(streamSourceTask.poll()));
         Awaitility.await().until(() -> !recoveredRecords.addAll(streamSourceTask.poll()));
         List<String> recoveredIds = recoveredRecords.stream().map(SourceRecord::key).map(String::valueOf)
-            .collect(Collectors.toList());
+                .collect(Collectors.toList());
         Assertions.assertEquals(Arrays.asList(id4, id5, id6), recoveredIds, "recoveredIds");
 
         PendingMessages pending = connection.sync().xpending(stream, RedisStreamSourceConfigDef.STREAM_CONSUMER_GROUP_DEFAULT);
