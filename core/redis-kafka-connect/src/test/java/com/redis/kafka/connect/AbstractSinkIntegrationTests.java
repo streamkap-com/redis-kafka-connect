@@ -360,7 +360,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                     new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisCommand.LPUSH, records);
+        put(topic, RedisCommand.LPUSH, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
         List<String> actual = connection.sync().lrange(topic, 0, -1);
         Collections.reverse(actual);
         assertEquals(expected, actual);
@@ -378,7 +378,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                     new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisCommand.RPUSH, records);
+        put(topic, RedisCommand.RPUSH, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
         List<String> actual = connection.sync().lrange(topic, 0, -1);
         assertEquals(expected, actual);
     }
@@ -395,7 +395,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                     new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisCommand.SADD, records);
+        put(topic, RedisCommand.SADD, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
         Set<String> members = connection.sync().smembers(topic);
         assertEquals(expected, members);
     }

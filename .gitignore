@@ -16,7 +16,7 @@ hs_err_*.log
 .project
 .settings
 .factorypath
-/.idea/
+.idea/
 build
 .gradle
 bin
