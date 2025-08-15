@@ -435,7 +435,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             String value = "This is value " + i;
             expected.put(topic + ":" + key, value);
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, key),
-                new SchemaAndValue(Schema.STRING_SCHEMA, value)));
+                    new SchemaAndValue(Schema.STRING_SCHEMA, value)));
         }
         put(topic, RedisCommand.SET, records);
         String[] keys = expected.keySet().toArray(new String[0]);
