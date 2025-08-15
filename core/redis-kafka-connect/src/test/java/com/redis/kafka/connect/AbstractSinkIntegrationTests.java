@@ -403,6 +403,84 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
     }
 
     @Test
+    void putRpushSeparateValues() {
+        String topic = "putRpushSeparateValues";
+        int count = 50;
+        Set<String> expected = new HashSet<>(count);
+        List<SinkRecord> records = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String member = "listmember:" + i;
+            expected.add(member);
+            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
+                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+        }
+        put(topic, RedisCommand.RPUSH, records);
+
+        List<String> keys = commands.keys("*");
+        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+            .stream()
+            .map(KeyValue::getKey)
+            .map(key -> key.split(":"))
+            .filter(parts -> parts.length >= 3)
+            .map(parts -> parts[1] + ":" + parts[2])
+            .collect(Collectors.toSet());
+
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void putLpushSeparateValues() {
+        String topic = "putLpushSeparateValues";
+        int count = 50;
+        Set<String> expected = new HashSet<>(count);
+        List<SinkRecord> records = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String member = "listmember:" + i;
+            expected.add(member);
+            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
+                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+        }
+        put(topic, RedisCommand.LPUSH, records);
+
+        List<String> keys = commands.keys("*");
+        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+            .stream()
+            .map(KeyValue::getKey)
+            .map(key -> key.split(":"))
+            .filter(parts -> parts.length >= 3)
+            .map(parts -> parts[1] + ":" + parts[2])
+            .collect(Collectors.toSet());
+
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void putSetSeparateValues() {
+        String topic = "putSet";
+        int count = 50;
+        Set<String> expected = new HashSet<>(count);
+        List<SinkRecord> records = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String member = "setmember:" + i;
+            expected.add(member);
+            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
+                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+        }
+        put(topic, RedisCommand.SADD, records);
+
+        List<String> keys = commands.keys("*");
+        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+            .stream()
+            .map(KeyValue::getKey)
+            .map(key -> key.split(":"))
+            .filter(parts -> parts.length >= 3)
+            .map(parts -> parts[1] + ":" + parts[2])
+            .collect(Collectors.toSet());
+
+        assertEquals(expected, actual);
+    }
+
+    @Test
     void putStream() {
         String topic = "putStream";
         int count = 50;
