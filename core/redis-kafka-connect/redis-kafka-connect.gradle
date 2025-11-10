@@ -62,6 +62,30 @@ tasks.register('copyRuntimeJars', Copy) {
     into("$buildDir/dependency-jars")
 }
 
+tasks.register('prepareConfluentArchive', Copy) {
+    group = "Confluent"
+    description = "Prepares the Confluent archive file for Confluent Hub"
+    dependsOn tasks.shadowJar
+
+    def baseDir = "$archiveFilename-${project.version}"
+    from('config/archive/manifest.json') {
+        expand(projectVersion: "${project.version}", releaseDate: "${releaseDate}")
+    }
+    from('config/archive/assets') {
+        into 'assets'
+    }
+    from(layout.buildDirectory.dir('libs')) {
+        include "${project.name}-${project.version}-all.jar"
+        into 'lib'
+    }
+    from('../..') {
+        include 'README.adoc'
+        include 'LICENSE'
+        into 'doc'
+    }
+    into layout.buildDirectory.dir("confluentArchive/${baseDir}")
+}
+
 tasks.register('createConfluentArchive', Zip) {
     group = "Confluent"
     description = "Creates the Confluent archive file to be released to Confluent Hub"
