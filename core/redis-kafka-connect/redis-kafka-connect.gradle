@@ -97,4 +97,4 @@ tasks.register('createConfluentArchive', Zip) {
     destinationDirectory = layout.buildDirectory.dir('confluent')
 }
 
-build.finalizedBy createConfluentArchive
+build.finalizedBy copyRuntimeJars, createConfluentArchive
