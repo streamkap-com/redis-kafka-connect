@@ -17,7 +17,7 @@
  */
 dependencies {
     implementation group: 'com.redis', name: 'lettucemod', version: lettucemodVersion
-    implementation group: 'com.redis', name: 'spring-batch-redis', version: springBatchRedisVersion
+    implementation group: 'com.redis', name: 'spring-batch-redis-core', version: springBatchRedisVersion
     implementation 'org.apache.commons:commons-pool2'
     implementation 'org.slf4j:slf4j-api'
     compileOnly 'org.apache.kafka:connect-api'
@@ -31,11 +31,7 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter-engine'
     testImplementation 'org.junit.platform:junit-platform-launcher'
     testImplementation 'org.slf4j:slf4j-simple'
-    testImplementation group: 'com.redis', name: 'spring-batch-redis', version: springBatchRedisVersion, classifier: 'tests'
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: testcontainersVersion
-    testImplementation(group: 'com.redis.testcontainers', name: 'testcontainers-redis', version: testcontainersRedisVersion) {
-        exclude group: 'com.redis', module: 'lettucemod'
-    }
+    testImplementation group: 'com.redis', name: 'spring-batch-redis-test', version: springBatchRedisVersion
 }
 
 eclipse {
@@ -44,15 +40,17 @@ eclipse {
     }
 }
 
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+jar.finalizedBy shadowJar
 
-compileJava {
-    options.release = 8
+tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    enableRelocation true
+    relocationPrefix "com.redis.kafka.connect.shaded"
+    relocate 'org.springframework.batch.core', 'org.springframework.batch.core'
+    mergeServiceFiles()
 }
 
 def archiveFilename = "redis-redis-kafka-connect"
-def releaseDate = DateTimeFormatter.ISO_LOCAL_DATE.format(LocalDateTime.now())
+def releaseDate = java.time.format.DateTimeFormatter.ISO_LOCAL_DATE.format(java.time.LocalDateTime.now())
 
 tasks.register('copyRuntimeJars', Copy) {
     description = "Copies all runtime dependencies as individual JARs"
@@ -64,4 +62,15 @@ tasks.register('copyRuntimeJars', Copy) {
     into("$buildDir/dependency-jars")
 }
 
-build.finalizedBy copyRuntimeJars
+tasks.register('createConfluentArchive', Zip) {
+    group = "Confluent"
+    description = "Creates the Confluent archive file to be released to Confluent Hub"
+    dependsOn tasks.prepareConfluentArchive
+    from(layout.buildDirectory.dir('confluentArchive'))
+    archiveBaseName = ""
+    archiveAppendix = archiveFilename
+    archiveVersion.set(project.version.toString())
+    destinationDirectory = layout.buildDirectory.dir('confluent')
+}
+
+build.finalizedBy createConfluentArchive

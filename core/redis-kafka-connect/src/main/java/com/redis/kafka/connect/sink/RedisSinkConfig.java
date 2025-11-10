@@ -24,102 +24,103 @@ import com.redis.kafka.connect.common.RedisConfig;
 
 public class RedisSinkConfig extends RedisConfig {
 
-    public enum RedisCommand {
-        HSET, JSONSET, TSADD, SET, XADD, LPUSH, RPUSH, SADD, ZADD, DEL
-    }
-    
-    /**
-     * @author Jonathon Ogden
-     * By default, Redis Sink Connector maps the Kafka Message Key to the entry (element or member) of a Redis List or Set. This option allows the user to change that
-     *
-     */
-    public enum MessageToCollectionEntryMap {
-        KEY, VALUE
-    }
+	public enum RedisType {
+		HASH, JSON, TIMESERIES, STRING, STREAM, LIST, SET, ZSET
+	}
 
-    public static final RedisSinkConfigDef CONFIG = new RedisSinkConfigDef();
+	/**
+	 * @author Jonathon Ogden
+	 * By default, Redis Sink Connector maps the Kafka Message Key to the entry (element or member) of a Redis List or Set. This option allows the user to change that
+	 *
+	 */
+	public enum MessageToCollectionEntryMap {
+		KEY, VALUE
+	}
 
-    private final Charset charset;
+	public static final RedisSinkConfigDef CONFIG = new RedisSinkConfigDef();
 
-    private final RedisCommand command;
+	private final Charset charset;
+	private final RedisType type;
+	private final String keyspace;
+	private final String separator;
+	private final boolean multiExec;
+	private final int waitReplicas;
+	private final Duration waitTimeout;
+	private final long keyTTL;
+	private final MessageToCollectionEntryMap mapping;
 
-    private final String keyspace;
+	public RedisSinkConfig(Map<?, ?> originals) {
+		super(new RedisSinkConfigDef(), originals);
+		String charsetName = getString(RedisSinkConfigDef.CHARSET_CONFIG).trim();
+		charset = Charset.forName(charsetName);
+		type = RedisType.valueOf(getString(RedisSinkConfigDef.TYPE_CONFIG));
+		keyspace = getString(RedisSinkConfigDef.KEYSPACE_CONFIG).trim();
+		separator = getString(RedisSinkConfigDef.SEPARATOR_CONFIG).trim();
+		multiExec = Boolean.TRUE.equals(getBoolean(RedisSinkConfigDef.MULTIEXEC_CONFIG));
+		waitReplicas = getInt(RedisSinkConfigDef.WAIT_REPLICAS_CONFIG);
+		waitTimeout = Duration.ofMillis(getLong(RedisSinkConfigDef.WAIT_TIMEOUT_CONFIG));
+		keyTTL = getLong(RedisSinkConfigDef.KEY_TTL_CONFIG);
+		mapping = MessageToCollectionEntryMap.valueOf(getString(RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG));
+	}
 
-    private final String separator;
+	public Charset getCharset() {
+		return charset;
+	}
 
-    private final boolean multiExec;
+	public RedisType getType() {
+		return type;
+	}
 
-    private final int waitReplicas;
+	public String getKeyspace() {
+		return keyspace;
+	}
 
-    private final Duration waitTimeout;
-    
-    private final MessageToCollectionEntryMap mapping;
+	public String getSeparator() {
+		return separator;
+	}
 
-    public RedisSinkConfig(Map<?, ?> originals) {
-        super(new RedisSinkConfigDef(), originals);
-        String charsetName = getString(RedisSinkConfigDef.CHARSET_CONFIG).trim();
-        charset = Charset.forName(charsetName);
-        command = RedisCommand.valueOf(getString(RedisSinkConfigDef.COMMAND_CONFIG));
-        keyspace = getString(RedisSinkConfigDef.KEY_CONFIG).trim();
-        separator = getString(RedisSinkConfigDef.SEPARATOR_CONFIG).trim();
-        multiExec = Boolean.TRUE.equals(getBoolean(RedisSinkConfigDef.MULTIEXEC_CONFIG));
-        waitReplicas = getInt(RedisSinkConfigDef.WAIT_REPLICAS_CONFIG);
-        waitTimeout = Duration.ofMillis(getLong(RedisSinkConfigDef.WAIT_TIMEOUT_CONFIG));
-        mapping = MessageToCollectionEntryMap.valueOf(getString(RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG));        
-    }
+	public boolean isMultiExec() {
+		return multiExec;
+	}
 
-    public Charset getCharset() {
-        return charset;
-    }
+	public int getWaitReplicas() {
+		return waitReplicas;
+	}
 
-    public RedisCommand getCommand() {
-        return command;
-    }
+	public Duration getWaitTimeout() {
+		return waitTimeout;
+	}
 
-    public String getKeyspace() {
-        return keyspace;
-    }
+	public long getKeyTTL() {
+		return keyTTL;
+	}
 
-    public String getSeparator() {
-        return separator;
-    }
+	public MessageToCollectionEntryMap getMapping() {
+		return mapping;
+	}
 
-    public boolean isMultiExec() {
-        return multiExec;
-    }
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = super.hashCode();
+		result = prime * result
+				+ Objects.hash(charset, keyspace, separator, multiExec, type, waitReplicas, waitTimeout, keyTTL, mapping);
+		return result;
+	}
 
-    public int getWaitReplicas() {
-        return waitReplicas;
-    }
-
-    public Duration getWaitTimeout() {
-        return waitTimeout;
-    }
-    
-    public MessageToCollectionEntryMap getMapping() {
-        return mapping;
-    }
-
-    @Override
-    public int hashCode() {
-        final int prime = 31;
-        int result = super.hashCode();
-        result = prime * result + Objects.hash(charset, keyspace, separator, multiExec, command, waitReplicas, waitTimeout, mapping);
-        return result;
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        if (this == obj)
-            return true;
-        if (!super.equals(obj))
-            return false;
-        if (getClass() != obj.getClass())
-            return false;
-        RedisSinkConfig other = (RedisSinkConfig) obj;
-        return Objects.equals(charset, other.charset) && Objects.equals(keyspace, other.keyspace)
-                && Objects.equals(separator, other.separator) && multiExec == other.multiExec && command == other.command
-                && waitReplicas == other.waitReplicas && waitTimeout == other.waitTimeout && mapping == other.mapping;
-    }
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (!super.equals(obj))
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		RedisSinkConfig other = (RedisSinkConfig) obj;
+		return Objects.equals(charset, other.charset) && Objects.equals(keyspace, other.keyspace)
+				&& Objects.equals(separator, other.separator) && multiExec == other.multiExec && type == other.type
+				&& waitReplicas == other.waitReplicas && waitTimeout == other.waitTimeout && keyTTL == other.keyTTL
+				&& mapping == other.mapping;
+	}
 
 }

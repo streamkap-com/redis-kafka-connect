@@ -15,14 +15,12 @@
  */
 package com.redis.kafka.connect.source;
 
-import java.time.Clock;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-
+import com.redis.kafka.connect.common.ManifestVersionProvider;
+import com.redis.spring.batch.item.redis.RedisItemReader;
+import com.redis.spring.batch.item.redis.common.KeyValue;
+import io.lettuce.core.AbstractRedisClient;
 import org.apache.kafka.connect.data.Schema;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.RetriableException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
@@ -31,129 +29,113 @@ import org.slf4j.LoggerFactory;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.batch.item.ItemStreamException;
 
-import com.redis.kafka.connect.common.ManifestVersionProvider;
-import com.redis.spring.batch.RedisItemReader.ReaderMode;
-import com.redis.spring.batch.common.KeyValue;
-import com.redis.spring.batch.reader.KeyValueItemReader;
-import com.redis.spring.batch.reader.StructItemReader;
-
-import io.lettuce.core.AbstractRedisClient;
-import io.lettuce.core.codec.StringCodec;
+import java.time.Clock;
+import java.util.*;
 
 public class RedisKeysSourceTask extends SourceTask {
 
-    private static final Logger log = LoggerFactory.getLogger(RedisKeysSourceTask.class);
+	private static final Logger log = LoggerFactory.getLogger(RedisKeysSourceTask.class);
 
-    public static final Schema KEY_SCHEMA = Schema.STRING_SCHEMA;
+	public static final Schema KEY_SCHEMA = Schema.STRING_SCHEMA;
 
-    /**
-     * The offsets that have been processed and that are to be acknowledged by the reader in
-     * {@link RedisKeysSourceTask#commit()}.
-     */
-    private final List<Map<String, ?>> sourceOffsets = new ArrayList<>();
+	private final ToStructFunction converter = new ToStructFunction();
+	private final Clock clock;
 
-    private final ToStructFunction converter = new ToStructFunction();
+	private AbstractRedisClient client;
+	private RedisItemReader<String, String> reader;
+	private int batchSize;
+	private String topic;
 
-    private final Clock clock;
+	public RedisKeysSourceTask() {
+		this(Clock.systemDefaultZone());
+	}
 
-    private String topic;
+	public RedisKeysSourceTask(Clock clock) {
+		this.clock = clock;
+	}
 
-    private int batchSize;
+	@Override
+	public String version() {
+		return ManifestVersionProvider.getVersion();
+	}
 
-    private StructItemReader<String, String> reader;
+	public RedisItemReader<String, String> getReader() {
+		return reader;
+	}
 
-    private AbstractRedisClient client;
+	@Override
+	public void start(Map<String, String> props) {
+		RedisKeysSourceConfig config = new RedisKeysSourceConfig(props);
+		this.topic = config.getTopicName();
+		this.batchSize = Math.toIntExact(config.getBatchSize());
+		this.client = config.client();
+		reader = RedisItemReader.struct();
+		// Use a random job name to not interfere with other key source tasks
+		reader.setName(UUID.randomUUID().toString());
+		reader.setClient(client);
+		reader.setMode(config.getMode());
+		reader.setPoolSize(config.getPoolSize());
+		reader.setDatabase(config.uri().getDatabase());
+		reader.setKeyPattern(config.getKeyPattern());
+		reader.setChunkSize(batchSize);
+		if (!config.getIdleTimeout().isNegative() && !config.getIdleTimeout().isZero()) {
+			reader.setIdleTimeout(config.getIdleTimeout());
+		}
+		try {
+			reader.open(new ExecutionContext());
+		} catch (ItemStreamException e) {
+			throw new RetriableException("Could not open reader", e);
+		}
+	}
 
-    public RedisKeysSourceTask() {
-        this(Clock.systemDefaultZone());
-    }
+	@Deprecated
+	@Override
+	public void commitRecord(SourceRecord sourceRecord) throws InterruptedException {
+		// do nothing - offset tracking not needed for Redis key monitoring
+	}
 
-    public RedisKeysSourceTask(Clock clock) {
-        this.clock = clock;
-    }
+	@Override
+	public void commit() throws InterruptedException {
+		// do nothing
+	}
 
-    @Override
-    public String version() {
-        return ManifestVersionProvider.getVersion();
-    }
+	@Override
+	public void stop() {
+		if (reader != null) {
+			reader.close();
+			reader = null;
+		}
+		if (client != null) {
+			client.shutdown();
+			client.getResources().shutdown();
+			client = null;
+		}
+	}
 
-    public KeyValueItemReader<String, String> getReader() {
-        return reader;
-    }
+	private SourceRecord convert(KeyValue<String> input) {
+		log.debug("Converting input {}", input);
+		Map<String, ?> partition = new HashMap<>();
+		Map<String, ?> offset = new HashMap<>();
+		String key = input.getKey();
+		long epoch = clock.instant().toEpochMilli();
+		return new SourceRecord(partition, offset, topic, null, KEY_SCHEMA, key, ToStructFunction.VALUE_SCHEMA,
+				converter.apply(input), epoch);
+	}
 
-    @Override
-    public void start(Map<String, String> props) {
-        log.info("Starting {}", props);
-        RedisKeysSourceConfig config = new RedisKeysSourceConfig(props);
-        this.topic = config.getTopicName();
-        this.batchSize = Math.toIntExact(config.getBatchSize());
-        this.client = config.client();
-        reader = new StructItemReader<>(client, StringCodec.UTF8);
-        reader.setMode(ReaderMode.LIVE);
-        reader.setPoolSize(config.getPoolSize());
-        reader.setDatabase(config.uri().getDatabase());
-        reader.setKeyPattern(config.getKeyPattern());
-        reader.setChunkSize(batchSize);
-        if (!config.getIdleTimeout().isNegative() && !config.getIdleTimeout().isZero()) {
-            reader.setIdleTimeout(config.getIdleTimeout());
-        }
-        try {
-            reader.open(new ExecutionContext());
-            log.info("Started RedisKeysSourceTask with config: {}", config);
-        } catch (ItemStreamException e) {
-            throw new RetriableException("Could not open reader", e);
-        }
-    }
-
-    private void addSourceOffset(Map<String, ?> sourceOffset) {
-        sourceOffsets.add(sourceOffset);
-    }
-
-    @Deprecated
-    @Override
-    public void commitRecord(SourceRecord sourceRecord) throws InterruptedException {
-        Map<String, ?> currentOffset = sourceRecord.sourceOffset();
-        if (currentOffset != null) {
-            addSourceOffset(currentOffset);
-        }
-    }
-
-    @Override
-    public void commit() throws InterruptedException {
-        // do nothing
-    }
-
-    @Override
-    public void stop() {
-        log.info("Stopping");
-        if (reader != null) {
-            reader.close();
-            reader = null;
-        }
-        if (client != null) {
-            client.shutdown();
-            client.getResources().shutdown();
-            client = null;
-        }
-    }
-
-    private SourceRecord convert(KeyValue<String> input) {
-        log.info("Converting input {}", input);
-        Map<String, ?> partition = new HashMap<>();
-        Map<String, ?> offset = new HashMap<>();
-        String key = input.getKey();
-        long epoch = clock.instant().toEpochMilli();
-        return new SourceRecord(partition, offset, topic, null, KEY_SCHEMA, key, ToStructFunction.VALUE_SCHEMA,
-                converter.apply(input), epoch);
-    }
-
-    @Override
-    public List<SourceRecord> poll() {
-        log.info("Task Poll start");
-        // TODO: return heartbeat if no records
-        List<SourceRecord> sourceRecords = reader.read(batchSize).stream().map(this::convert).collect(Collectors.toList());
-        log.info("Task Poll end, nb records {}", sourceRecords.size());
-        return sourceRecords;
-    }
+	@Override
+	public List<SourceRecord> poll() {
+		log.debug("Task Poll start");
+		List<SourceRecord> records = new ArrayList<>();
+		KeyValue<String> item;
+		try {
+			while (records.size() < batchSize && (item = reader.read()) != null) {
+				records.add(convert(item));
+			}
+		} catch (Exception e) {
+			throw new ConnectException("Could not read from Redis", e);
+		}
+		log.debug("Task Poll end, nb records {}", records.size());
+		return records;
+	}
 
 }
