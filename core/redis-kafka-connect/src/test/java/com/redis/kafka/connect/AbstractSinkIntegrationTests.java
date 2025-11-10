@@ -375,15 +375,12 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                 new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisType.LIST, records);
+        put(topic, RedisType.STRING, records);
 
         List<String> keys = redisConnection.sync().keys("*");
         Set<String> actual = redisConnection.sync().mget(keys.toArray(new String[0]))
             .stream()
-            .map(KeyValue::getKey)
-            .map(key -> key.split(":"))
-            .filter(parts -> parts.length >= 3)
-            .map(parts -> parts[1] + ":" + parts[2])
+            .map(KeyValue::getValue)
             .collect(Collectors.toSet());
 
         assertEquals(expected, actual);
@@ -401,15 +398,12 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                 new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisType.LIST, records);
+        put(topic, RedisType.STRING, records);
 
         List<String> keys = redisConnection.sync().keys("*");
         Set<String> actual = redisConnection.sync().mget(keys.toArray(new String[0]))
             .stream()
-            .map(KeyValue::getKey)
-            .map(key -> key.split(":"))
-            .filter(parts -> parts.length >= 3)
-            .map(parts -> parts[1] + ":" + parts[2])
+            .map(KeyValue::getValue)
             .collect(Collectors.toSet());
 
         assertEquals(expected, actual);
@@ -427,15 +421,12 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                 new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisType.SET, records);
+        put(topic, RedisType.STRING, records);
 
         List<String> keys = redisConnection.sync().keys("*");
         Set<String> actual = redisConnection.sync().mget(keys.toArray(new String[0]))
             .stream()
-            .map(KeyValue::getKey)
-            .map(key -> key.split(":"))
-            .filter(parts -> parts.length >= 3)
-            .map(parts -> parts[1] + ":" + parts[2])
+            .map(KeyValue::getValue)
             .collect(Collectors.toSet());
 
         assertEquals(expected, actual);
