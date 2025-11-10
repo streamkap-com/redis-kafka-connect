@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.redis.kafka.connect.sink.RedisSinkConfig.MessageToCollectionEntryMap;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -360,7 +361,8 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                     new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisCommand.LPUSH, records);
+
+        put(topic, RedisCommand.LPUSH, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
         List<String> actual = connection.sync().lrange(topic, 0, -1);
         Collections.reverse(actual);
         assertEquals(expected, actual);
@@ -378,7 +380,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                     new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisCommand.RPUSH, records);
+        put(topic, RedisCommand.RPUSH, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
         List<String> actual = connection.sync().lrange(topic, 0, -1);
         assertEquals(expected, actual);
     }
@@ -395,9 +397,87 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
             records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
                     new SchemaAndValue(Schema.STRING_SCHEMA, member)));
         }
-        put(topic, RedisCommand.SADD, records);
+        put(topic, RedisCommand.SADD, records, RedisSinkConfigDef.MESSAGE_TO_COLLECTION_ENTRY_MAP_CONFIG, MessageToCollectionEntryMap.KEY.name());
         Set<String> members = connection.sync().smembers(topic);
         assertEquals(expected, members);
+    }
+
+    @Test
+    void putRpushSeparateValues() {
+        String topic = "putRpushSeparateValues";
+        int count = 50;
+        Set<String> expected = new HashSet<>(count);
+        List<SinkRecord> records = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String member = "listmember:" + i;
+            expected.add(member);
+            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
+                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+        }
+        put(topic, RedisCommand.RPUSH, records);
+
+        List<String> keys = commands.keys("*");
+        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+            .stream()
+            .map(KeyValue::getKey)
+            .map(key -> key.split(":"))
+            .filter(parts -> parts.length >= 3)
+            .map(parts -> parts[1] + ":" + parts[2])
+            .collect(Collectors.toSet());
+
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void putLpushSeparateValues() {
+        String topic = "putLpushSeparateValues";
+        int count = 50;
+        Set<String> expected = new HashSet<>(count);
+        List<SinkRecord> records = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String member = "listmember:" + i;
+            expected.add(member);
+            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
+                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+        }
+        put(topic, RedisCommand.LPUSH, records);
+
+        List<String> keys = commands.keys("*");
+        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+            .stream()
+            .map(KeyValue::getKey)
+            .map(key -> key.split(":"))
+            .filter(parts -> parts.length >= 3)
+            .map(parts -> parts[1] + ":" + parts[2])
+            .collect(Collectors.toSet());
+
+        assertEquals(expected, actual);
+    }
+
+    @Test
+    void putSetSeparateValues() {
+        String topic = "putSet";
+        int count = 50;
+        Set<String> expected = new HashSet<>(count);
+        List<SinkRecord> records = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            String member = "setmember:" + i;
+            expected.add(member);
+            records.add(write(topic, new SchemaAndValue(Schema.STRING_SCHEMA, member),
+                new SchemaAndValue(Schema.STRING_SCHEMA, member)));
+        }
+        put(topic, RedisCommand.SADD, records);
+
+        List<String> keys = commands.keys("*");
+        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+            .stream()
+            .map(KeyValue::getKey)
+            .map(key -> key.split(":"))
+            .filter(parts -> parts.length >= 3)
+            .map(parts -> parts[1] + ":" + parts[2])
+            .collect(Collectors.toSet());
+
+        assertEquals(expected, actual);
     }
 
     @Test
@@ -488,7 +568,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
 
     public void put(String topic, RedisCommand command, List<SinkRecord> records, String... props) {
         SinkTaskContext taskContext = mock(SinkTaskContext.class);
-        when(taskContext.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, 1)));
+        when(taskContext.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, PARTITION)));
         task.initialize(taskContext);
         Map<String, String> propsMap = map(RedisSinkConfigDef.URI_CONFIG, getRedisServer().getRedisURI(),
                 RedisSinkConfigDef.COMMAND_CONFIG, command.name());
@@ -501,7 +581,7 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
     void putDelete() {
         String topic = "putDelete";
         SinkTaskContext taskContext = mock(SinkTaskContext.class);
-        when(taskContext.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, 1)));
+        when(taskContext.assignment()).thenReturn(ImmutableSet.of(new TopicPartition(topic, PARTITION)));
         this.task.initialize(taskContext);
         this.task.start(ImmutableMap.of(RedisSinkConfigDef.URI_CONFIG, getRedisServer().getRedisURI(),
                 RedisSinkConfigDef.COMMAND_CONFIG, RedisCommand.DEL.name()));
