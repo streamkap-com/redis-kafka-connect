@@ -377,8 +377,8 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         }
         put(topic, RedisType.LIST, records);
 
-        List<String> keys = commands.keys("*");
-        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+        List<String> keys = redisConnection.sync().keys("*");
+        Set<String> actual = redisConnection.sync().mget(keys.toArray(new String[0]))
             .stream()
             .map(KeyValue::getKey)
             .map(key -> key.split(":"))
@@ -403,8 +403,8 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         }
         put(topic, RedisType.LIST, records);
 
-        List<String> keys = commands.keys("*");
-        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+        List<String> keys = redisConnection.sync().keys("*");
+        Set<String> actual = redisConnection.sync().mget(keys.toArray(new String[0]))
             .stream()
             .map(KeyValue::getKey)
             .map(key -> key.split(":"))
@@ -429,8 +429,8 @@ abstract class AbstractSinkIntegrationTests extends AbstractTestBase {
         }
         put(topic, RedisType.SET, records);
 
-        List<String> keys = commands.keys("*");
-        Set<String> actual = commands.mget(keys.toArray(new String[0]))
+        List<String> keys = redisConnection.sync().keys("*");
+        Set<String> actual = redisConnection.sync().mget(keys.toArray(new String[0]))
             .stream()
             .map(KeyValue::getKey)
             .map(key -> key.split(":"))
