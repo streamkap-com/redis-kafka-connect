@@ -46,6 +46,8 @@ tasks.named('shadowJar', com.github.jengelman.gradle.plugins.shadow.tasks.Shadow
     enableRelocation true
     relocationPrefix "com.redis.kafka.connect.shaded"
     relocate 'org.springframework.batch.core', 'org.springframework.batch.core'
+    // Connect always loads org.slf4j from the worker; relocating it leaves the connector with no SLF4J provider (NOP logger)
+    relocate 'org.slf4j', 'org.slf4j'
     mergeServiceFiles()
 }
 
